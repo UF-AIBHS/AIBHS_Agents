@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Run Claude Code routed through the LiteLLM proxy defined in the .env next to this script.
+# Expects ANTHROPIC_API_KEY and LITELLM_BASE_URL in .env.
+#
+# Usage:  ./claude-litellm [any claude arguments]
+set -euo pipefail
+
+# Resolve .env relative to this script, not the caller's cwd
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="$SCRIPT_DIR/.env"
+
+if [ ! -f "$ENV_FILE" ]; then
+  echo "claude-litellm: no .env next to script ($SCRIPT_DIR)" >&2
+  exit 1
+fi
+
+set -a
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+set +a
+
+: "${LITELLM_BASE_URL:?LITELLM_BASE_URL missing from .env}"
+: "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY missing from .env}"
+
+# Claude Code validates ANTHROPIC_API_KEY against Anthropic's key format, which a
+# Navigator key will fail. ANTHROPIC_AUTH_TOKEN is passed through as a bearer token,
+# which is what the proxy expects.
+export ANTHROPIC_BASE_URL="$LITELLM_BASE_URL"
+export ANTHROPIC_AUTH_TOKEN="$ANTHROPIC_API_KEY"
+unset ANTHROPIC_API_KEY
+
+# Claude Code defaults to model names the Navigator key is not provisioned for,
+# which comes back as "403 team not allowed to access model". Pin to models on
+# the UF allowlist. Override either one by setting it in .env.
+export ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-4.6-sonnet}"
+export ANTHROPIC_SMALL_FAST_MODEL="${ANTHROPIC_SMALL_FAST_MODEL:-claude-4.5-haiku}"
+
+# Campus/corporate firewalls often block Claude Code's telemetry and analytics
+# hosts, which surfaces as "connection refused". Only the proxy is needed.
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+
+exec claude "$@"
